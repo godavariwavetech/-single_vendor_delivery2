@@ -1,15 +1,13 @@
 import axios from 'axios';
 
-const BASE_URL = "http://192.168.0.130:5000";
+const BASE_URL = "https://api.abhi24.in/delivery_boy";
 
-const instance = axios.create({
+export const instance = axios.create({
   baseURL: BASE_URL,
   timeout: 5000, // Increased timeout for real API calls
-  headers: {
-    'Content-Type': 'application/json',
-  }
 });
 
+// Add response interceptor to handle errors globally
 // Add response interceptor to handle errors globally
 instance.interceptors.response.use(
   (response) => response,
@@ -30,10 +28,15 @@ instance.interceptors.response.use(
 );
 
 export const API_ENDPOINTS = {
-  LOGIN: '/api/delivery/login',
-  GET_ORDERS: (deliveryBoyId) => `/api/delivery/${deliveryBoyId}`, // Updated to use delivery boy ID
-  GET_ORDER_DETAILS: (orderId) => `/api/delivery/order/${orderId}`,
-  GET_DELIVERED_ORDERS: (deliveryBoyId) => `/api/delivery/${deliveryBoyId}/delivered`, // New endpoint for delivered orders
+  LOGIN: '/login',
+  REGISTER: '/register',
+  RESET_PASSWORD: '/reset-password',
+  GET_ORDERS: (deliveryBoyId) => `/${deliveryBoyId}`, // Updated to use delivery boy ID
+  GET_ORDER_DETAILS: (orderId) => `/order/${orderId}`,
+  GET_DELIVERED_ORDERS: (deliveryBoyId, params = {}) => {
+    const { page = 1, limit = 20 } = params;
+    return `/${deliveryBoyId}/delivered?page=${page}&limit=${limit}`;
+  }, // Updated endpoint with pagination support
 };
 
 export default instance;

@@ -1,16 +1,20 @@
-import React from 'react';
-import { useSelector } from 'react-redux';
+import React, { useEffect } from 'react';
+import { View, ActivityIndicator } from 'react-native';
+import { useSelector, useDispatch } from 'react-redux';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import { initializeAuth } from '../redux/slices/authSlice';
 import LoginScreen from '../screens/LoginScreen';
+import RegistrationScreen from '../screens/RegistrationScreen';
 import HomeScreen from '../screens/HomeScreen';
 import OrderDetailsScreen from '../screens/OrderDetailsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import DeliveredOrdersScreen from '../screens/DeliveredOrdersScreen';
 import CustomHeader from '../components/CustomHeader';
 import { colors } from '../theme/colors';
+import SplashScreen from '../screens/SplashScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -69,11 +73,28 @@ const MainTabs = () => {
 };
 
 export default function AppNavigator() {
-  const user = useSelector(state => state.auth.user);
-  console.log(user);
+  const dispatch = useDispatch();
+  const { user, isInitialized, loading } = useSelector(state => state.auth);
+
+
+  useEffect(() => {
+    const delay = setTimeout(() => {
+      dispatch(initializeAuth());
+    }, 2000); // Delay before auth check
+  
+    return () => clearTimeout(delay);
+  }, [dispatch]);
+  
+
+  // Show loading screen while checking stored credentials
+  if (!isInitialized || loading) {
+    return <SplashScreen />;
+  } 
+
   return (
     <NavigationContainer>
       <Stack.Navigator screenOptions={screenOptions}>
+        
         {user ? (
           <>
             <Stack.Screen 
@@ -88,11 +109,18 @@ export default function AppNavigator() {
             />
           </>
         ) : (
-          <Stack.Screen 
-            name="Login" 
-            component={LoginScreen} 
-            options={{ headerShown: false }} 
-          />
+          <>
+            <Stack.Screen 
+              name="Login" 
+              component={LoginScreen} 
+              options={{ headerShown: false }} 
+            />
+            <Stack.Screen 
+              name="Registration" 
+              component={RegistrationScreen} 
+              options={{ headerShown: false }} 
+            />
+          </>
         )}
       </Stack.Navigator>
     </NavigationContainer>

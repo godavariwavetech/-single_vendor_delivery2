@@ -9,14 +9,17 @@ import {
   RefreshControl,
   Platform,
   Alert,
+  Linking, // <-- Add this import
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+
+import { useNavigation, useFocusEffect,useRoute } from '@react-navigation/native';
 import { useSelector, useDispatch } from 'react-redux';
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { fetchOrders } from '../redux/slices/orderSlice';
 import { colors } from '../theme/colors';
 import { commonStyles } from '../theme/commonStyles';
 import CustomStatusBar from '../components/CustomStatusBar';
+import { getOrderTypeColor, getOrderTypeIcon, getOrderTypeText } from '../utils/orderTypeHelpers';
 
 const OrderCard = ({ order, onPress }) => {
   if (!order) return null; // Add null check for order
@@ -56,9 +59,35 @@ const OrderCard = ({ order, onPress }) => {
     }
   };
 
+
   const formatCurrency = (amount) => {
     if (typeof amount !== 'number') return `₹${amount}`;
     return `₹${amount.toFixed(2)}`;
+  };
+
+  const formatDateTime = (dateTimeStr) => {
+    if (!dateTimeStr) return 'No date available';
+    const date = new Date(dateTimeStr);
+    return date.toLocaleString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+  };
+
+  // Helper to open address in Google Maps
+  const openInMaps = (address) => {
+    if (!address) return;
+    const url = Platform.select({
+      ios: `http://maps.apple.com/?q=${encodeURIComponent(address)}`,
+      android: `geo:0,0?q=${encodeURIComponent(address)}`,
+      default: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
+    });
+    Linking.openURL(url).catch(() => {
+      Alert.alert('Error', 'Unable to open maps.');
+    });
   };
 
   return (
@@ -67,28 +96,39 @@ const OrderCard = ({ order, onPress }) => {
       onPress={onPress}
       activeOpacity={0.7}
     >
-      <View style={[commonStyles.row, commonStyles.spaceBetween]}>
-        <View style={styles.orderInfo}>
-          <Text style={styles.orderNumber}>{order.order_id || 'No Order Number'}</Text>
-          <Text style={styles.customerName}>{order.customer_name || 'No Customer Name'}</Text>
+      <View style={styles.orderInfo}>
+        <View style={styles.orderMetaInfo}>
+          <View style={styles.iconTextRow}>
+            <Icon name="receipt" size={16} color={colors.text.secondary} style={styles.infoIcon} />
+            <Text style={styles.orderNumber} numberOfLines={1}>{order.order_id || 'No Order Number'}</Text>
+          </View>
+          <View style={[styles.badge, { backgroundColor: getStatusColor(order.order_status) }]}>
+            <Icon name={getStatusIcon(order.order_status)} size={14} color={colors.white} style={styles.badgeIcon} />
+            <Text style={styles.badgeText}>{getStatusText(order.order_status) || 'Unknown'}</Text>
+          </View>
         </View>
-        <View style={[styles.badge, { backgroundColor: getStatusColor(order.order_status) }]}>
-          <Icon name={getStatusIcon(order.order_status)} size={14} color={colors.white} style={styles.badgeIcon} />
-          <Text style={styles.badgeText}>{getStatusText(order.order_status) || 'Unknown'}</Text>
+        <View style={styles.orderTypeRow}>
+          <View style={[styles.orderTypeBadge, { backgroundColor: getOrderTypeColor(order.order_type) }]}>
+            <Icon name={getOrderTypeIcon(order.order_type)} size={12} color={colors.white} style={styles.badgeIcon} />
+            <Text style={styles.orderTypeBadgeText}>{getOrderTypeText(order.order_type)}</Text>
+          </View>
+        </View>
+        <View style={styles.iconTextRow}>
+          <Icon name="access-time" size={14} color={colors.text.light} style={styles.infoIcon} />
+          <Text style={styles.dateTime}>{order.order_datetime}</Text>
+        </View>
+        <View style={styles.iconTextRow}>
+          <Icon name="person" size={16} color={colors.text.primary} style={styles.infoIcon} />
+          <Text style={styles.customerName}>{order.customer_name || 'No Customer Name'}</Text>
         </View>
       </View>
       
       <View style={styles.addressContainer}>
         <Icon name="location-on" size={16} color={colors.text.secondary} style={styles.addressIcon} />
-        <Text style={styles.address} numberOfLines={2}>{order.delivery_address || 'No address provided'}</Text>
+        <TouchableOpacity onPress={() => openInMaps(order.delivery_address)} activeOpacity={0.7} style={{flex: 1}}>
+          <Text style={styles.address} numberOfLines={2}>{order.delivery_address || 'No address provided'}</Text>
+        </TouchableOpacity>
       </View>
-
-      {/* <View style={styles.restaurantContainer}>
-        <Icon name="restaurant" size={16} color={colors.text.secondary} style={styles.restaurantIcon} />
-        <Text style={styles.restaurant}>
-          {order.items?.[0]?.restaurant || 'Unknown Restaurant'}
-        </Text>
-      </View> */}
       
       <View style={styles.footer}>
         <View style={styles.paymentMethod}>
@@ -97,9 +137,9 @@ const OrderCard = ({ order, onPress }) => {
             size={16} 
             color={colors.text.secondary} 
           />
-          <Text style={styles.paymentText}>{order.payment_type || 'Payment method not specified'}</Text>
+          <Text style={styles.paymentText}>{order.payment_type || 'Payment  not specified'}</Text>
         </View>
-        <Text style={styles.amount}>{formatCurrency(order.payment_amount)}</Text>
+        <Text style={styles.amount}>{formatCurrency(order.grand_total)}</Text>
       </View>
     </TouchableOpacity>
   );
@@ -109,10 +149,11 @@ export default function HomeScreen() {
   const navigation = useNavigation();
   const dispatch = useDispatch();
   const [refreshing, setRefreshing] = useState(false);
+  const route = useRoute(); // get route params
   
   const user = useSelector((state) => state.auth.user);
   const { orders, loading, error } = useSelector((state) => state.orders);
-
+  console.log("hie", orders)
   // Check if user is logged in and has delivery_boy_id
   const isUserValid = user && user.id;
   
@@ -149,11 +190,17 @@ export default function HomeScreen() {
     setRefreshing(false);
   };
 
-  useEffect(() => {
-    if (isUserValid) {
-      handleFetchOrders();
-    }
-  }, [isUserValid]);
+  useFocusEffect(
+    React.useCallback(() => {
+      if (isUserValid) {
+        handleFetchOrders();
+        // Remove refreshOrders param if it exists
+        if (route.params?.refreshOrders) {
+          navigation.setParams({ refreshOrders: false });
+        }
+      }
+    }, [isUserValid, route.params])
+  );
 
   if (!isUserValid) {
     return (
@@ -320,6 +367,9 @@ const styles = StyleSheet.create({
   orderCard: {
     marginBottom: 12,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.white,
     ...Platform.select({
       ios: {
         shadowColor: colors.shadow,
@@ -328,40 +378,96 @@ const styles = StyleSheet.create({
         shadowRadius: 4,
       },
       android: {
-        elevation: 2,
+        elevation: 3,
       },
     }),
   },
   orderInfo: {
     flex: 1,
-    marginRight: 12,
+    paddingRight: 4,
+    paddingBottom: 4,
+  },
+  orderMetaInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+    flexWrap: 'nowrap',
+  },
+  orderTypeRow: {
+    marginTop: 4,
+    marginBottom: 4,
+    alignItems: 'flex-start',
+  },
+  orderTypeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    alignSelf: 'flex-start',
+  },
+  orderTypeBadgeText: {
+    fontSize: 10,
+    color: colors.white,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  iconTextRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    minWidth: 0, // Ensures text can be truncated
+  },
+  infoIcon: {
+    marginRight: 4,
+    width: 16,
   },
   orderNumber: {
     fontSize: 14,
     color: colors.text.secondary,
+    flex: 1,
+    marginRight: 8,
+    minWidth: 0, // Ensures text can be truncated
+  },
+  dateTime: {
+    fontSize: 12,
+    color: colors.text.light,
     marginBottom: 4,
   },
   customerName: {
     fontSize: 16,
     fontWeight: '600',
     color: colors.text.primary,
+    marginBottom: 2,
   },
   badge: {
     ...commonStyles.badge,
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 20,
+    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    minWidth: 60,
+    maxWidth: 80,
+    justifyContent: 'center',
+    flexShrink: 0, // Prevents badge from shrinking
   },
   badgeIcon: {
     marginRight: 4,
   },
   badgeText: {
     ...commonStyles.badgeText,
+    fontSize: 10,
+    flexShrink: 1, // Allows text to shrink if needed
   },
   addressContainer: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     marginTop: 8,
+    backgroundColor: colors.background,
+    padding: 8,
+    borderRadius: 8,
   },
   addressIcon: {
     marginRight: 4,
@@ -397,6 +503,10 @@ const styles = StyleSheet.create({
   paymentMethod: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: colors.background,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
   },
   paymentText: {
     fontSize: 14,
@@ -407,6 +517,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: colors.text.primary,
+    backgroundColor: colors.background,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
   },
   emptyContainer: {
     flex: 1,

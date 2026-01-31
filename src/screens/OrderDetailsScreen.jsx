@@ -13,25 +13,49 @@ import {
   Modal,
   PermissionsAndroid,
   Platform,
+  ActionSheetIOS,
 } from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialIcons';
-import { launchCamera } from 'react-native-image-picker';
+import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
 import { colors } from '../theme/colors';
 import { commonStyles, spacing, typography, radius } from '../theme/commonStyles';
 import CustomHeader from '../components/CustomHeader';
 import CustomStatusBar from '../components/CustomStatusBar';
 import instance, { API_ENDPOINTS } from '../services/api';
+import { getOrderTypeColor, getOrderTypeIcon, getOrderTypeText } from '../utils/orderTypeHelpers';
 
-const DetailRow = ({ icon, label, value, isPhone }) => (
+
+// Helper to open address in Google Maps
+const openInMaps = (address) => {
+  if (!address) return;
+  const url = Platform.select({
+    ios: `http://maps.apple.com/?q=${encodeURIComponent(address)}`,
+    android: `geo:0,0?q=${encodeURIComponent(address)}`,
+    default: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
+  });
+  Linking.openURL(url).catch(() => {
+    Alert.alert('Error', 'Unable to open maps.');
+  });
+};
+
+const DetailRow = ({ icon, label, value, isPhone, isAddress }) => (
   <View style={styles.detailRow}>
     <View style={styles.labelWrapper}>
-      <Icon name={icon} size={18} color={colors.text.secondary} />
+      <Icon name={icon} size={18} color={colors.text.secondary} style={styles.detailIcon} />
       <View style={styles.detailContent}>
         <Text style={styles.detailLabel}>{label}</Text>
         {isPhone ? (
           <TouchableOpacity onPress={() => Linking.openURL(`tel:${value}`)}>
             <Text style={styles.phoneValue}>{value || 'N/A'}</Text>
+          </TouchableOpacity>
+        ) : isAddress ? (
+          <TouchableOpacity onPress={() => openInMaps(value)} activeOpacity={0.7} style={styles.addressContainer}>
+            <Text style={styles.addressValue} numberOfLines={10}>{value || 'N/A'}</Text>
+            <View style={styles.addressActionContainer}>
+              <Icon name="directions" size={14} color={colors.primary} />
+              <Text style={styles.addressActionText}>Tap to open in maps</Text>
+            </View>
           </TouchableOpacity>
         ) : (
           <Text style={styles.detailValue} numberOfLines={2}>{value || 'N/A'}</Text>
@@ -45,6 +69,7 @@ const OrderItem = ({ item }) => (
   <View style={styles.itemRow}>
     <View style={styles.itemInfo}>
       <Text style={styles.itemName}>{item?.name || 'Unknown Item'}</Text>
+      <Text style={styles.itemQuantity}>Quantity Type: {item?.quantityType || 'Unknown'}</Text>
       <Text style={styles.itemQuantity}>Quantity: {item?.quantity || 0}</Text>
     </View>
     <Text style={styles.itemPrice}>₹{(item?.price || 0).toFixed(2)}</Text>
@@ -54,19 +79,16 @@ const OrderItem = ({ item }) => (
 export default function OrderDetailsScreen() {
   const route = useRoute();
   const navigation = useNavigation();
-  const orderId = route.params?.order?.id;
-  console.log('orderId', orderId);
+  const orderId = route.params?.order?.order_id;
   const [order, setOrder] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [deliveryImage, setDeliveryImage] = useState(null);
   const [showImagePreview, setShowImagePreview] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showImagePickerModal, setShowImagePickerModal] = useState(false);
 
-  console.log('deliveryImage', Object.keys(deliveryImage));
-
- console.log('deliveryImage', { originalPath: deliveryImage.originalPath, type: deliveryImage.type, height: deliveryImage.height, width: deliveryImage.width, fileName: deliveryImage.fileName, fileSize: deliveryImage.fileSize, uri: deliveryImage.uri});
-
+  console.log("orderdetails", route.params?.order)
   useEffect(() => {
     fetchOrderDetails();
   }, [orderId]);
@@ -77,12 +99,14 @@ export default function OrderDetailsScreen() {
       setError(null);
       const response = await instance.get(API_ENDPOINTS.GET_ORDER_DETAILS(orderId));
       const orderData = response.data.data;
-
-      console.log('orderData Keys:', Object.keys(orderData));
-      console.log('Item Keys:', Object.keys(orderData.items[0]));
+      console.log("h===H", orderData)
+  
 
       const transformedOrder = {
         orderNumber: orderData.order_id,
+        masterOrderId: orderData.id,
+        subscribeId : orderData.subscribe_id,
+        customerId : orderData.customer_id,
         customerName: orderData.customer_name,
         customerMobile: orderData.customer_mobile_number,
         status: orderData.order_status,
@@ -90,12 +114,14 @@ export default function OrderDetailsScreen() {
         deliveryAddress: orderData.delivery_address,
         paymentType: orderData.payment_type,
         deliveryBoyId: orderData.delivery_boy_id,
+        imageCaptureAtCustomer: orderData.image_capture_at_customer,
         deliveryCharges: Number(orderData.delivery_charges),
         totalAmount: Number(orderData.total_amount),
         grandTotal: Number(orderData.grand_total),
         orderInstructions: orderData.order_instructions,
         deliveryInstructions: orderData.delivery_instruction,
-
+        deliveryDateTime: orderData.delivery_date_time, // Added deliveryDateTime
+        orderType: orderData.order_type,
         items: orderData.items.map(item => ({
           item_id: item.item_id,
           name: item.item_name,
@@ -202,13 +228,27 @@ export default function OrderDetailsScreen() {
     }
   };
 
+
   const handleCall = () => {
     if (order?.phone) {
       Linking.openURL(`tel:${order.phone}`);
     }
   };
 
-  const captureImage = async () => {
+  const showImagePicker = () => {
+    setShowImagePickerModal(true);
+  };
+
+  const handleImageSourceSelect = (source) => {
+    setShowImagePickerModal(false);
+    if (source === 'camera') {
+      captureImageFromCamera();
+    } else if (source === 'gallery') {
+      selectImageFromGallery();
+    }
+  };
+
+  const captureImageFromCamera = async () => {
     try {
       if (Platform.OS === 'android') {
         const granted = await PermissionsAndroid.request(
@@ -237,9 +277,8 @@ export default function OrderDetailsScreen() {
       const result = await launchCamera(options);
 
       if (result.didCancel) {
-        console.log('User cancelled camera');
+        // User cancelled
       } else if (result.errorCode) {
-        console.log('ImagePicker Error:', result.errorMessage);
         Alert.alert('Error', 'Failed to capture image. Please try again.');
       } else if (result.assets && result.assets[0]) {
         setDeliveryImage(result.assets[0]);
@@ -250,57 +289,119 @@ export default function OrderDetailsScreen() {
     }
   };
 
+  const selectImageFromGallery = async () => {
+    try {
+      // react-native-image-picker handles permissions automatically
+      // No need to manually request permissions for gallery access
+      const options = {
+        mediaType: 'photo',
+        quality: 0.8,
+        includeBase64: true,
+        maxWidth: 2000,
+        maxHeight: 2000,
+      };
+
+      const result = await launchImageLibrary(options);
+
+      if (result.didCancel) {
+        // User cancelled
+      } else if (result.errorCode) {
+        Alert.alert('Error', 'Failed to select image. Please try again.');
+      } else if (result.assets && result.assets[0]) {
+        setDeliveryImage(result.assets[0]);
+      }
+    } catch (error) {
+      console.error('Gallery Error:', error);
+      Alert.alert('Error', 'Failed to access gallery. Please try again.');
+    }
+  };
+
   const handleDeliveryComplete = async () => {
     if (!deliveryImage) {
       Alert.alert(
         'Image Required',
-        'Please capture a delivery confirmation image before marking as delivered.',
-        [{ text: 'OK', onPress: captureImage }]
+        'Please capture a delivery confirmation image before marking the order as delivered.',
+        [{ text: 'OK', onPress: showImagePicker }]
       );
       return;
     }
-
+  
     try {
       setIsSubmitting(true);
-
-      // Create form data for image upload
+      
       const formData = new FormData();
       formData.append('delivery_image', {
         uri: deliveryImage.uri,
         type: 'image/jpeg',
-        name: 'delivery_confirmation.jpg'
+        name: 'delivery_confirmation.jpg',
       });
-      formData.append('order_id', order.order_id);
-      formData.append('status', 2); // 2 for delivered status
-
-      // Make API call to update order status with image
+      formData.append('subscribe_id', order.subscribeId); // ✅ your internal order_id
+      formData.append('status', 2);
+      formData.append('order_type', order.orderType); // ✅ send "normal" / "subscription" customerId
+      formData.append('customer_id', order.customerId);
+      formData.append("amount", order.grandTotal); 
+      formData.append("order_number", order.orderNumber);
+      console.log("form data", formData)
       const response = await instance.post(
-        `/api/delivery/order/${order.order_id}/complete`,
+        `/order/${route.params?.order?.id}/complete`, // orderId is the DB `id` field (primary key)
         formData,
         {
           headers: {
             'Content-Type': 'multipart/form-data',
           },
+          timeout: 10000,
         }
       );
-
-      if (response.data.success) {
+      console.log("submit response", response)
+      if (response?.data?.success) {
         Alert.alert(
           'Success',
-          'Order marked as delivered successfully!',
-          [{ text: 'OK', onPress: () => navigation.goBack() }]
+          'Order has been marked as delivered successfully.',
+          [
+            {
+              text: 'OK',
+              onPress: () =>
+                navigation.reset({
+                  index: 0,
+                  routes: [
+                    {
+                      name: 'MainTabs',
+                      params: {
+                        screen: 'HomeTab',
+                        params: { refreshOrders: true },
+                      },
+                    },
+                  ],
+                }),
+            },
+          ]
         );
+      } else {
+        throw new Error(response?.data?.message || 'Unexpected response from server');
       }
     } catch (error) {
-      console.error('Delivery completion error:', error);
-      Alert.alert(
-        'Error',
-        error.response?.data?.message || 'Failed to mark order as delivered. Please try again.'
-      );
+      console.error('❌ Delivery completion error:', error);
+  
+      let message = 'Something went wrong. Please try again.';
+  
+      if (error.response) {
+        message =
+          error.response.data?.message ||
+          `Server Error (${error.response.status})`;
+      } else if (error.request) {
+        message =
+          'Unable to connect to the server. Please check your internet connection.';
+      } else if (error.message.includes('timeout')) {
+        message = 'Request timed out. Please try again.';
+      }
+  
+      Alert.alert('Error', message);
     } finally {
       setIsSubmitting(false);
     }
   };
+  
+
 
   // Image preview modal
   const ImagePreviewModal = () => (
@@ -330,27 +431,110 @@ export default function OrderDetailsScreen() {
     </Modal>
   );
 
+  // Custom Image Picker Action Sheet Modal
+  const ImagePickerModal = () => (
+    <Modal
+      visible={showImagePickerModal}
+      transparent={true}
+      animationType="slide"
+      onRequestClose={() => setShowImagePickerModal(false)}
+    >
+      <View style={styles.actionSheetOverlay}>
+        <TouchableOpacity
+          style={styles.actionSheetBackdrop}
+          activeOpacity={1}
+          onPress={() => setShowImagePickerModal(false)}
+        />
+        <View style={styles.actionSheetContainer}>
+          <View style={styles.actionSheetHandle} />
+          <Text style={styles.actionSheetTitle}>Select Image Source</Text>
+          {/* <Text style={styles.actionSheetSubtitle}>Choose how you want to add an image</Text> */}
+          
+          <View style={styles.actionSheetButtons}>
+            <TouchableOpacity
+              style={styles.actionSheetButton}
+              onPress={() => handleImageSourceSelect('camera')}
+            >
+              <View style={styles.actionSheetButtonContent}>
+                <View style={[styles.actionSheetIconContainer, { backgroundColor: colors.primary + '20' }]}>
+                  <Icon name="camera-alt" size={24} color={colors.primary} />
+                </View>
+                <View style={styles.actionSheetButtonText}>
+                  <Text style={styles.actionSheetButtonTitle}>Camera</Text>
+                  <Text style={styles.actionSheetButtonSubtitle}>Take a new photo</Text>
+                </View>
+                <Icon name="chevron-right" size={20} color={colors.text.secondary} />
+              </View>
+            </TouchableOpacity>
+
+            {/* <TouchableOpacity
+              style={styles.actionSheetButton}
+              onPress={() => handleImageSourceSelect('gallery')}
+            >
+              <View style={styles.actionSheetButtonContent}>
+                <View style={[styles.actionSheetIconContainer, { backgroundColor: colors.success + '20' }]}>
+                  <Icon name="photo-library" size={24} color={colors.success} />
+                </View>
+                <View style={styles.actionSheetButtonText}>
+                  <Text style={styles.actionSheetButtonTitle}>Gallery</Text>
+                  <Text style={styles.actionSheetButtonSubtitle}>Choose from photos</Text>
+                </View>
+                <Icon name="chevron-right" size={20} color={colors.text.secondary} />
+              </View>
+            </TouchableOpacity> */}
+          </View>
+
+          <TouchableOpacity
+            style={styles.actionSheetCancelButton}
+            onPress={() => setShowImagePickerModal(false)}
+          >
+            <Text style={styles.actionSheetCancelText}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  // Helper to open address in Google Maps
+  const openInMaps = (address) => {
+    if (!address) return;
+    const url = Platform.select({
+      ios: `http://maps.apple.com/?q=${encodeURIComponent(address)}`,
+      android: `geo:0,0?q=${encodeURIComponent(address)}`,
+      default: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
+    });
+    Linking.openURL(url).catch(() => {
+      Alert.alert('Error', 'Unable to open maps.');
+    });
+  };
+
   return (
     <View style={styles.mainContainer}>
       <CustomStatusBar />
-      <SafeAreaView style={commonStyles.safeArea}>
+      <SafeAreaView style={[commonStyles.safeArea, styles.safeAreaContainer]}>
         <CustomHeader
           title="Order Details"
           showBack={true}
           onBackPress={() => navigation.goBack()}
         />
-        <ScrollView style={styles.container}>
+        <ScrollView
+          style={styles.container}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
           <View style={commonStyles.card}>
-            <View style={[commonStyles.row, commonStyles.spaceBetween]}>
+            <View style={styles.headerRow}>
               <Text style={styles.orderId}>{order.orderNumber || 'No Order Number'}</Text>
-              <View
-                style={[
-                  styles.badge,
-                  { backgroundColor: getStatusColor(order.status) },
-                ]}
-              >
+              <View style={[styles.badge, { backgroundColor: getStatusColor(order.status) }]}>
                 <Icon name={getStatusIcon(order.status)} size={14} color={colors.white} style={styles.badgeIcon} />
                 <Text style={styles.badgeText}>{getStatusText(order.status) || 'Unknown'}</Text>
+              </View>
+            </View>
+            
+            <View style={styles.orderTypeRow}>
+              <View style={[styles.badge, { backgroundColor: getOrderTypeColor(order.orderType) }]}>
+                <Icon name={getOrderTypeIcon(order.orderType)} size={14} color={colors.white} style={styles.badgeIcon} />
+                <Text style={styles.badgeText}>{getOrderTypeText(order.orderType)}</Text>
               </View>
             </View>
 
@@ -369,6 +553,7 @@ export default function OrderDetailsScreen() {
                   icon="location-on"
                   label="Address"
                   value={order.deliveryAddress}
+                  isAddress={true}
                 />
                 <DetailRow
                   icon="phone"
@@ -376,10 +561,15 @@ export default function OrderDetailsScreen() {
                   value={order.customerMobile}
                   isPhone={true}
                 />
+                <DetailRow
+                  icon="access-time"
+                  label="Order Time"
+                  value={order.orderDateTime}
+                />
               </View>
             </View>
 
-            {order.items?.[0]?.restaurant && (
+            {/* {order.items?.[0]?.restaurant && (
               <View style={styles.section}>
                 <View style={styles.sectionHeader}>
                   <Icon name="restaurant" size={20} color={colors.text.primary} />
@@ -387,7 +577,7 @@ export default function OrderDetailsScreen() {
                 </View>
                 <Text style={styles.restaurantName}>{order.items[0].restaurant}</Text>
               </View>
-            )}
+            )} */}
 
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
@@ -423,6 +613,44 @@ export default function OrderDetailsScreen() {
                   <Text style={styles.sectionTitle}>Delivery Instructions</Text>
                 </View>
                 <Text style={styles.instructions}>{order.deliveryInstructions}</Text>
+                {order.deliveryDateTime && (
+                  <View style={styles.deliveryTimeContainer}>
+                    <Icon name="schedule" size={16} color={colors.text.secondary} style={styles.timeIcon} />
+                    <Text style={styles.deliveryTime}>Delivery Time: {order.deliveryDateTime}</Text>
+                  </View>
+                )}
+              </View>
+            )}
+
+            {/* Show delivered image for completed deliveries */}
+            {order.status === 3 && order.imageCaptureAtCustomer && (
+              <View style={styles.section}>
+                <View style={styles.sectionHeader}>
+                  <Icon name="photo-camera" size={20} color={colors.text.primary} />
+                  <Text style={styles.sectionTitle}>Delivery Confirmation</Text>
+                </View>
+                <View style={styles.deliveredImageContainer}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      setDeliveryImage({ uri: order.imageCaptureAtCustomer });
+                      setShowImagePreview(true);
+                    }}
+                    style={styles.deliveredImageWrapper}
+                  >
+                    <Image
+                      source={{ uri: order.imageCaptureAtCustomer }}
+                      style={styles.deliveredImage}
+                      resizeMode="cover"
+                    />
+                    <View style={styles.imageOverlay}>
+                      <Icon name="zoom-in" size={24} color={colors.white} />
+                      <Text style={styles.viewImageText}>View Image</Text>
+                    </View>
+                  </TouchableOpacity>
+                  <Text style={styles.deliveryConfirmationText}>
+                    Delivery confirmed with photo
+                  </Text>
+                </View>
               </View>
             )}
           </View>
@@ -445,26 +673,26 @@ export default function OrderDetailsScreen() {
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={styles.retakeButton}
-                        onPress={captureImage}
+                        onPress={showImagePicker}
                       >
                         <Icon name="camera-alt" size={20} color={colors.primary} />
-                        <Text style={styles.retakeText}>Retake</Text>
+                        <Text style={styles.retakeText}>Change</Text>
                       </TouchableOpacity>
                     </View>
                   ) : (
                     <TouchableOpacity
                       style={[styles.captureButton, commonStyles.button]}
-                      onPress={captureImage}
+                      onPress={showImagePicker}
                     >
                       <Icon name="camera-alt" size={20} color={colors.white} style={styles.buttonIcon} />
-                      <Text style={commonStyles.buttonText}>Capture Delivery Image</Text>
+                      <Text style={commonStyles.buttonText}>Add Delivery Image</Text>
                     </TouchableOpacity>
                   )}
 
                   <TouchableOpacity
                     style={[
                       commonStyles.button,
-                      { 
+                      {
                         backgroundColor: colors.success,
                         flexDirection: 'row',
                         alignItems: 'center',
@@ -487,7 +715,7 @@ export default function OrderDetailsScreen() {
                 </>
               )}
 
-              {(order.status === 0 || order.status === 1) && (
+              {/* {(order.status === 0 || order.status === 1) && (
                 <TouchableOpacity
                   style={[
                     commonStyles.button,
@@ -507,12 +735,13 @@ export default function OrderDetailsScreen() {
                   <Icon name="cancel" size={20} color={colors.white} style={styles.buttonIcon} />
                   <Text style={commonStyles.buttonText}>Cancel Delivery</Text>
                 </TouchableOpacity>
-              )}
+              )} */}
             </View>
           )}
         </ScrollView>
       </SafeAreaView>
       <ImagePreviewModal />
+      <ImagePickerModal />
     </View>
   );
 }
@@ -520,15 +749,32 @@ export default function OrderDetailsScreen() {
 const styles = StyleSheet.create({
   mainContainer: {
     flex: 1,
-    backgroundColor: colors.primary,
+    backgroundColor: colors.background,
+
+  },
+  safeAreaContainer: {
+    flex: 1,
   },
   container: {
     flex: 1,
-    padding: spacing.md,
+    padding: spacing.sm,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 80, // Add padding to prevent overlap with bottom tab
   },
   orderId: {
     ...typography.h3,
     color: colors.text.primary,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  orderTypeRow: {
+    marginBottom: spacing.sm,
   },
   badge: {
     paddingHorizontal: spacing.sm,
@@ -640,6 +886,18 @@ const styles = StyleSheet.create({
     ...typography.body1,
     color: colors.text.secondary,
   },
+  deliveryTimeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.xs,
+  },
+  timeIcon: {
+    marginRight: spacing.xs,
+  },
+  deliveryTime: {
+    ...typography.caption,
+    color: colors.text.secondary,
+  },
   actions: {
     padding: spacing.md,
   },
@@ -739,5 +997,166 @@ const styles = StyleSheet.create({
   previewImage: {
     width: '100%',
     height: '100%',
+  },
+  deliveredImageContainer: {
+    alignItems: 'center',
+    marginTop: spacing.md,
+  },
+  deliveredImageWrapper: {
+    width: '100%',
+    height: 200,
+    borderRadius: radius.md,
+    overflow: 'hidden',
+    marginBottom: spacing.sm,
+  },
+  deliveredImage: {
+    width: '100%',
+    height: '100%',
+  },
+  imageOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: radius.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  viewImageText: {
+    ...typography.body2,
+    color: colors.white,
+    marginTop: spacing.xs,
+  },
+  deliveryConfirmationText: {
+    ...typography.body1,
+    color: colors.text.secondary,
+    marginTop: spacing.sm,
+  },
+  detailIcon: {
+    marginRight: spacing.sm,
+  },
+  addressContainer: {
+    marginTop: spacing.xs,
+  },
+  addressValue: {
+    fontSize: 14,
+    color: colors.text.primary,
+    fontWeight: '400',
+    lineHeight: 20,
+  },
+  addressActionContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.xs,
+  },
+  addressActionText: {
+    fontSize: 12,
+    color: colors.primary,
+    marginLeft: spacing.xs,
+  },
+  // Action Sheet Modal Styles
+  actionSheetOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  actionSheetBackdrop: {
+    flex: 1,
+  },
+  actionSheetContainer: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: Platform.OS === 'ios' ? 34 : "15%", // Account for iOS home indicator
+    paddingHorizontal: spacing.lg,
+    maxHeight: '90%',
+  },
+  actionSheetHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: colors.border.light,
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: spacing.lg,
+  },
+  actionSheetTitle: {
+    ...typography.h3,
+    color: colors.text.primary,
+    textAlign: 'center',
+    marginBottom: spacing.xs,
+  },
+  actionSheetSubtitle: {
+    ...typography.body2,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    marginBottom: spacing.lg,
+  },
+  actionSheetButtons: {
+    marginBottom: spacing.lg,
+  },
+  actionSheetButton: {
+    backgroundColor: colors.white,
+    borderRadius: radius.md,
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border.light,
+    shadowColor: colors.black,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  actionSheetButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.md,
+  },
+  actionSheetIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: spacing.md,
+  },
+  actionSheetButtonText: {
+    flex: 1,
+  },
+  actionSheetButtonTitle: {
+    ...typography.body1,
+    color: colors.text.primary,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  actionSheetButtonSubtitle: {
+    ...typography.caption,
+    color: colors.text.secondary,
+  },
+  actionSheetCancelButton: {
+    backgroundColor: colors.white,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.border.light,
+    shadowColor: colors.black,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  actionSheetCancelText: {
+    ...typography.body1,
+    color: colors.error,
+    fontWeight: '600',
   },
 });

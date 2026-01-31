@@ -9,28 +9,87 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  useColorScheme
 } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import Icon from 'react-native-vector-icons/MaterialIcons';
+import Toast from 'react-native-toast-message';
 import { loginUser, clearError } from '../redux/slices/authSlice';
 import { colors } from '../theme/colors';
 import { commonStyles } from '../theme/commonStyles';
 import CustomStatusBar from '../components/CustomStatusBar';
 
-export default function LoginScreen() {
+export default function LoginScreen({ navigation, route }) {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [phoneError, setPhoneError] = useState('');
   const dispatch = useDispatch();
-  const { loading, error } = useSelector((state) => state.auth);
+  const { loading, error, user } = useSelector((state) => state.auth);
+  const scheme = useColorScheme(); // 'light' | 'dark'
+
+  // pick placeholder color based on scheme
+  const placeholderColor =
+    scheme === 'dark' ? colors.text.tertiary : colors.text.secondary;
 
   // Clear backend errors when inputs change
   useEffect(() => {
     if (error) {
-      dispatch(clearError());
+      Toast.show({
+        type: 'error',
+        text1: 'Login Failed',
+        text2: error,
+        visibilityTime: 4000,
+        autoHide: true,
+        topOffset: 60,
+        onHide: () => {
+          // Clear error only after toast disappears
+          dispatch(clearError());
+        }
+      });
     }
-  }, [phone, password]);
+  }, [error, dispatch]);
+
+  // Show success toast when user logs in
+  useEffect(() => {
+    if (user && !loading) {
+      Toast.show({
+        type: 'success',
+        text1: 'Welcome Back!',
+        text2: `Hello ${user.delivery_boy_name || 'Delivery Boy'}!`,
+        visibilityTime: 3000,
+        autoHide: true,
+        topOffset: 60,
+      });
+    }
+  }, [user, loading]);
+
+  // Show welcome message when coming from registration
+  useEffect(() => {
+    if (route?.params?.fromRegistration) {
+      if (route?.params?.registrationSuccess) {
+        // Show detailed success message for successful registration
+        Toast.show({
+          type: 'success',
+          text1: '🎉 Welcome to the Team!',
+          text2: `Delivery boy account created successfully! ID: ${route?.params?.newUserId}`,
+          visibilityTime: 5000,
+          autoHide: true,
+          topOffset: 60,
+        });
+      } else {
+        // Show simple message for manual navigation
+        Toast.show({
+          type: 'info',
+          text1: 'Registration Complete!',
+          text2: 'Please login with your credentials',
+          visibilityTime: 4000,
+          autoHide: true,
+          topOffset: 60,
+        });
+      }
+    }
+  }, [route?.params?.fromRegistration, route?.params?.registrationSuccess, route?.params?.newUserId]);
 
   const validatePhone = (value) => {
     const phoneRegex = /^[0-9]{10}$/;
@@ -56,9 +115,32 @@ export default function LoginScreen() {
     }
   };
 
+  
+
   const handleLogin = () => {
+    if (!phone.trim() || !password.trim()) {
+      Toast.show({
+        type: 'error',
+        text1: 'Missing Information',
+        text2: 'Please fill in all fields',
+        visibilityTime: 3000,
+        autoHide: true,
+        topOffset: 60,
+      });
+      return;
+    }
+
     if (validatePhone(phone)) {
       dispatch(loginUser({ phone: phone.trim(), password: password.trim() }));
+    } else {
+      Toast.show({
+        type: 'error',
+        text1: 'Invalid Phone Number',
+        text2: 'Please enter a valid 10-digit phone number',
+        visibilityTime: 3000,
+        autoHide: true,
+        topOffset: 60,
+      });
     }
   };
 
@@ -82,7 +164,7 @@ export default function LoginScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Phone Number"
-                placeholderTextColor={colors.text.light}
+                placeholderTextColor={placeholderColor}
                 value={phone}
                 onChangeText={handlePhoneChange}
                 keyboardType="numeric"
@@ -98,7 +180,7 @@ export default function LoginScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Password"
-                placeholderTextColor={colors.text.light}
+                placeholderTextColor={placeholderColor}
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry={!showPassword}
@@ -137,6 +219,13 @@ export default function LoginScreen() {
               )}
             </TouchableOpacity>
           </View>
+
+          {/* <View style={styles.registerContainer}>
+            <Text style={styles.registerText}>Don't have an account? </Text>
+            <TouchableOpacity onPress={() => navigation.navigate('Registration', { fromLogin: true })}>
+              <Text style={styles.registerLink}>Sign Up</Text>
+            </TouchableOpacity>
+          </View> */}
 
           <View style={styles.hintContainer}>
             <Icon name="info" size={16} color={colors.text.light} style={styles.hintIcon} />
@@ -246,5 +335,20 @@ const styles = StyleSheet.create({
   buttonContainer: {
     flexDirection: "row",
     alignItems: "center",
-  }
+  },
+  registerContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  registerText: {
+    color: colors.text.secondary,
+    fontSize: 16,
+  },
+  registerLink: {
+    color: colors.primary,
+    fontSize: 16,
+    fontWeight: '600',
+  },
 });

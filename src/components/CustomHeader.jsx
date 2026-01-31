@@ -3,7 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native
 import Icon from 'react-native-vector-icons/MaterialIcons';
 import { colors } from '../theme/colors';
 
-const CustomHeader = ({ title, showBack, onBackPress }) => {
+const CustomHeader = ({ title, showBack, onBackPress, rightComponent }) => {
   return (
     <View style={styles.header}>
       <View style={styles.headerContent}>
@@ -19,7 +19,9 @@ const CustomHeader = ({ title, showBack, onBackPress }) => {
         <Text style={styles.title} numberOfLines={1}>
           {title}
         </Text>
-        <View style={styles.rightPlaceholder} />
+        <View style={styles.rightContainer}>
+          {rightComponent || <View style={styles.rightPlaceholder} />}
+        </View>
       </View>
     </View>
   );
@@ -60,6 +62,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.white,
     textAlign: 'center',
+  },
+  rightContainer: {
+    width: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   rightPlaceholder: {
     width: 40,

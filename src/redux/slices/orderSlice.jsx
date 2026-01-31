@@ -1,5 +1,5 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
-import instance, { API_ENDPOINTS } from '../../services/api';
+import { API_ENDPOINTS,instance } from '../../services/api';
 
 // Async thunk for fetching orders
 export const fetchOrders = createAsyncThunk(
@@ -17,7 +17,7 @@ export const fetchOrders = createAsyncThunk(
       
       // Check if response has orders property as per backend
       if (response.data && response.data.orders) {
-        console.log("response.data.orders", response.data.orders);
+       
         return response.data.orders;
       }
       
@@ -31,10 +31,10 @@ export const fetchOrders = createAsyncThunk(
   }
 );
 
-// New thunk for fetching delivered orders
+// New thunk for fetching delivered orders with pagination
 export const fetchDeliveredOrders = createAsyncThunk(
   'orders/fetchDeliveredOrders',
-  async (_, { rejectWithValue, getState }) => {
+  async (params = {}, { rejectWithValue, getState }) => {
     try {
       const deliveryBoyId = getState().auth.user?.id;
       
@@ -42,10 +42,37 @@ export const fetchDeliveredOrders = createAsyncThunk(
         return rejectWithValue('User not logged in');
       }
 
-      const response = await instance.get(API_ENDPOINTS.GET_DELIVERED_ORDERS(deliveryBoyId));
+      // Extract pagination parameters
+      const { page = 1, limit = 20, reset = false } = params;
       
-      if (response.data && response.data.orders) {
-        return response.data.orders;
+      const response = await instance.get(API_ENDPOINTS.GET_DELIVERED_ORDERS(deliveryBoyId, { page, limit }));
+      
+      // Handle different response formats
+      if (response.data) {
+        // If response has orders array directly (legacy format)
+        if (Array.isArray(response.data)) {
+          return {
+            orders: response.data,
+            page,
+            limit,
+            hasMore: response.data.length === limit, // If we got full page, there might be more
+            total: response.data.length,
+            reset
+          };
+        }
+        
+        // If response has orders property (new paginated format)
+        if (response.data.orders) {
+          const pagination = response.data.pagination || {};
+          return {
+            orders: response.data.orders,
+            page: pagination.currentPage || page,
+            limit: pagination.itemsPerPage || limit,
+            hasMore: pagination.hasMore || response.data.orders.length === limit,
+            total: pagination.totalItems || response.data.orders.length,
+            reset
+          };
+        }
       }
       
       return rejectWithValue('Invalid response format');
@@ -63,6 +90,12 @@ const orderSlice = createSlice({
   initialState: {
     orders: [],
     deliveredOrders: [], // New state for delivered orders
+    deliveredOrdersMeta: { // Pagination metadata
+      currentPage: 1,
+      hasMore: true,
+      total: 0,
+      loading: false,
+    },
     loading: false,
     error: null,
   },
@@ -70,7 +103,22 @@ const orderSlice = createSlice({
     clearOrders: (state) => {
       state.orders = [];
       state.deliveredOrders = []; // Clear delivered orders too
+      state.deliveredOrdersMeta = {
+        currentPage: 1,
+        hasMore: true,
+        total: 0,
+        loading: false,
+      };
       state.error = null;
+    },
+    resetDeliveredOrdersPagination: (state) => {
+      state.deliveredOrders = [];
+      state.deliveredOrdersMeta = {
+        currentPage: 1,
+        hasMore: true,
+        total: 0,
+        loading: false,
+      };
     },
   },
   extraReducers: (builder) => {
@@ -91,19 +139,39 @@ const orderSlice = createSlice({
       // Handle fetchDeliveredOrders states
       .addCase(fetchDeliveredOrders.pending, (state) => {
         state.loading = true;
+        state.deliveredOrdersMeta.loading = true;
         state.error = null;
       })
       .addCase(fetchDeliveredOrders.fulfilled, (state, action) => {
         state.loading = false;
-        state.deliveredOrders = action.payload;
+        state.deliveredOrdersMeta.loading = false;
         state.error = null;
+        
+        const { orders, page, hasMore, total, reset } = action.payload;
+        
+        if (reset || page === 1) {
+          // Reset orders for first page or reset
+          state.deliveredOrders = orders;
+        } else {
+          // Append orders for subsequent pages
+          state.deliveredOrders = [...state.deliveredOrders, ...orders];
+        }
+        
+        // Update pagination metadata
+        state.deliveredOrdersMeta = {
+          currentPage: page,
+          hasMore,
+          total,
+          loading: false,
+        };
       })
       .addCase(fetchDeliveredOrders.rejected, (state, action) => {
         state.loading = false;
+        state.deliveredOrdersMeta.loading = false;
         state.error = action.payload;
       });
   },
 });
 
-export const { clearOrders } = orderSlice.actions;
+export const { clearOrders, resetDeliveredOrdersPagination } = orderSlice.actions;
 export default orderSlice.reducer; 

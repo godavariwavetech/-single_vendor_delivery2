@@ -39,7 +39,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'yarn'
+          cache: 'npm'
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -59,7 +59,7 @@ jobs:
             "cmake;3.22.1"
 
       - name: Install dependencies
-        run: yarn install --frozen-lockfile --network-timeout 1000000
+        run: npm ci --no-audit --no-fund
 
       - name: Restore signing keystore
         env:

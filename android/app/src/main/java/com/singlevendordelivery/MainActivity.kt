@@ -1,4 +1,4 @@
-package com.abhi24delivery
+package com.singlevendordelivery
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate

@@ -90,6 +90,7 @@ jobs:
         working-directory: android
         run: |
           chmod +x gradlew
+          ./gradlew generateCodegenArtifactsFromSchema --no-daemon
           ./gradlew assembleRelease -PbundleDebugApk assembleDebug --no-daemon
 
       - name: Upload release APK

@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const BASE_URL = "https://api.abhi24.in/delivery_boy";
+const BASE_URL = "https://ekart360.in:2166";
 
 export const instance = axios.create({
   baseURL: BASE_URL,
